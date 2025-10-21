@@ -62,15 +62,7 @@ jobs:
       - name: Handle output
         run: |
           # Detect DumprX output folder
-          if [ -d "rom" ]; then
-            OUTPUT="rom"
-          elif [ -d "out" ]; then
-            OUTPUT="out"
-          else
-            echo "❌ No DumprX output folder found!"
-            exit 1
-          fi
-
+          OUTPUT=dumprx/out
           cd "$OUTPUT"
 
           if [ -n "${{ inputs.TARGET_PATH }}" ]; then
