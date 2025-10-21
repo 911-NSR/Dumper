@@ -44,22 +44,28 @@ jobs:
           ./setup.sh || true
           echo "✅ DumprX setup complete (safe mode)"
 
+      - name: Download ROM inside DumprX
+        run: |
+          cd dumprx
+          echo "📥 Downloading ROM from ${{ inputs.ROM_URL }}"
+          aria2c -x16 -s16 -k1M "${{ inputs.ROM_URL }}" -o rom.zip
+          ls -lh rom.zip
+
       - name: Extract ROM with DumprX (safe mode)
         run: |
           cd dumprx
           export TERM=xterm-256color   # Fix for GitHub Actions
-          OUTPUT_PATH="$(pwd)/../output"
+          OUTPUT_PATH="$(pwd)/output"
           mkdir -p "$OUTPUT_PATH"
 
-          echo "⚙️ Extracting ROM from URL (rootless safe mode)..."
-          bash dumper.sh "${{ inputs.ROM_URL }}" "$OUTPUT_PATH" --no-mount
+          echo "⚙️ Extracting ROM (rootless safe mode)..."
+          bash dumper.sh "rom.zip" "$OUTPUT_PATH" --no-mount
           echo "✅ Extraction completed"
           ls -lh "$OUTPUT_PATH"
 
       - name: Handle output
         run: |
-          OUTPUT_PATH="$(pwd)/../output"
-          cd "$OUTPUT_PATH" || exit 1
+          cd dumprx/output || exit 1
 
           if [ -n "${{ inputs.TARGET_PATH }}" ]; then
             TARGET="${{ inputs.TARGET_PATH }}"
@@ -67,7 +73,7 @@ jobs:
 
             if [ -d "$TARGET" ] || [ -f "$TARGET" ]; then
               ZIP_NAME="${{ inputs.ROM_TYPE }}_${TARGET//\//_}.zip"
-              zip -r "../../$ZIP_NAME" "$TARGET"
+              zip -r "../$ZIP_NAME" "$TARGET"
               echo "✅ Zipped specific folder/file: $ZIP_NAME"
             else
               echo "❌ Path not found: $TARGET"
@@ -75,7 +81,7 @@ jobs:
             fi
           else
             ZIP_NAME="${{ inputs.ROM_TYPE }}_full_dump.zip"
-            zip -r "../../$ZIP_NAME" ./*
+            zip -r "../$ZIP_NAME" ./*
             echo "✅ Zipped full ROM dump: $ZIP_NAME"
           fi
 
@@ -84,6 +90,6 @@ jobs:
         with:
           name: ${{ inputs.ROM_TYPE }}-ROM-Dump
           path: |
-            *.zip
+            dumprx/*.zip
           retention-days: 7
           
