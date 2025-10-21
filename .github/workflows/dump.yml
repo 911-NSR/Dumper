@@ -10,7 +10,7 @@ on:
         description: 'ROM name (MIUI, HyperOS, LineageOS, etc.)'
         required: true
       TARGET_PATH:
-        description: 'Optional folder or file to extract'
+        description: 'Optional folder or file to extract inside the ROM output'
         default: ''
 
 jobs:
@@ -38,7 +38,7 @@ jobs:
           chmod +x setup.sh dumper.sh
           echo "✅ DumprX cloned"
 
-      - name: Run DumprX setup
+      - name: Run DumprX setup (safe mode)
         run: |
           cd dumprx
           ./setup.sh || true
@@ -54,34 +54,42 @@ jobs:
       - name: Extract ROM with DumprX
         run: |
           cd dumprx
-          export TERM=xterm-256color   # Fix for GitHub Actions
-
+          export TERM=xterm-256color
           echo "⚙️ Extracting ROM (rootless safe mode)..."
           bash dumper.sh "rom.zip"
           echo "✅ Extraction completed"
 
-          # DumprX default output folder is rom.zip → out/
-          ls -lh out
-
       - name: Handle output
         run: |
-          cd dumprx/out || exit 1
+          # Detect DumprX output folder
+          if [ -d "rom" ]; then
+            OUTPUT="rom"
+          elif [ -d "out" ]; then
+            OUTPUT="out"
+          else
+            echo "❌ No DumprX output folder found!"
+            exit 1
+          fi
+
+          cd "$OUTPUT"
 
           if [ -n "${{ inputs.TARGET_PATH }}" ]; then
             TARGET="${{ inputs.TARGET_PATH }}"
             echo "🎯 Extracting specific path: $TARGET"
 
-            if [ -d "$TARGET" ] || [ -f "$TARGET" ]; then
-              ZIP_NAME="${{ inputs.ROM_TYPE }}_${TARGET//\//_}.zip"
-              zip -r "../$ZIP_NAME" "$TARGET"
-              echo "✅ Zipped specific folder/file: $ZIP_NAME"
-            else
+            # Search for folder/file inside output
+            FOUND=$(find . -path "./$TARGET" -type d -o -path "./$TARGET" -type f)
+            if [ -z "$FOUND" ]; then
               echo "❌ Path not found: $TARGET"
               exit 1
             fi
+
+            ZIP_NAME="../${{ inputs.ROM_TYPE }}_${TARGET//\//_}.zip"
+            zip -r "$ZIP_NAME" $FOUND
+            echo "✅ Zipped specific folder/file: $ZIP_NAME"
           else
-            ZIP_NAME="${{ inputs.ROM_TYPE }}_full_dump.zip"
-            zip -r "../$ZIP_NAME" ./*
+            ZIP_NAME="../${{ inputs.ROM_TYPE }}_full_dump.zip"
+            zip -r "$ZIP_NAME" ./*
             echo "✅ Zipped full ROM dump: $ZIP_NAME"
           fi
 
