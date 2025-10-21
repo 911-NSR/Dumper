@@ -1,0 +1,84 @@
+name: ROM Dumper & Extractor
+
+on:
+  workflow_dispatch:
+    inputs:
+      ROM_URL:
+        description: 'Direct download link to ROM (e.g. MIUI, LineageOS, etc.)'
+        required: true
+      FOLDER_TO_EXTRACT:
+        description: 'Folder to extract (e.g. system, vendor, product)'
+        required: true
+      ROM_TYPE:
+        description: 'ROM type name (e.g. MIUI, HyperOS, LineageOS)'
+        required: true
+      OUTPUT_ZIP_NAME:
+        description: 'Name for the extracted folder zip (without .zip)'
+        default: 'extracted_folder'
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip zip p7zip-full aria2 lz4 tar
+
+      - name: Download ROM
+        run: |
+          echo "Downloading ROM from ${{ inputs.ROM_URL }}"
+          mkdir -p rom
+          cd rom
+          aria2c -x16 -s16 -k1M "${{ inputs.ROM_URL }}" -o rom.zip
+          echo "✅ Download complete"
+          ls -lh
+
+      - name: Detect and extract ROM
+        run: |
+          cd rom
+          FILE=$(ls)
+          mkdir -p extracted
+          echo "📦 Extracting ROM: $FILE"
+
+          if [[ "$FILE" == *.zip ]]; then
+            unzip -q "$FILE" -d extracted/
+          elif [[ "$FILE" == *.tgz ]]; then
+            tar -xzf "$FILE" -C extracted/
+          elif [[ "$FILE" == *.tar.gz ]]; then
+            tar -xzf "$FILE" -C extracted/
+          elif [[ "$FILE" == *.7z ]]; then
+            7z x "$FILE" -oextracted/
+          else
+            echo "❌ Unsupported format: $FILE"
+            exit 1
+          fi
+
+          echo "✅ Extraction finished."
+          ls extracted
+
+      - name: Extract requested folder
+        run: |
+          cd rom/extracted
+          TARGET="${{ inputs.FOLDER_TO_EXTRACT }}"
+          if [ -d "$TARGET" ]; then
+            echo "📁 Found folder: $TARGET"
+            zip -r "../../${{ inputs.OUTPUT_ZIP_NAME }}.zip" "$TARGET"
+            echo "✅ Folder compressed as ${{ inputs.OUTPUT_ZIP_NAME }}.zip"
+          else
+            echo "❌ Folder '$TARGET' not found!"
+            echo "Available folders:"
+            ls
+            exit 1
+          fi
+
+      - name: Upload extracted folder as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.ROM_TYPE }}-${{ inputs.FOLDER_TO_EXTRACT }}-dump
+          path: ${{ inputs.OUTPUT_ZIP_NAME }}.zip
+          retention-days: 7
