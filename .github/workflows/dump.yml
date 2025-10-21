@@ -1,137 +1,90 @@
-name: Universal ROM Dumper (with Deep Folder Extraction)
+name: ROM DumperX Extractor (GitHub Safe Mode)
 
 on:
   workflow_dispatch:
     inputs:
       ROM_URL:
-        description: 'Direct download link to ROM (.zip, .tgz, .7z, etc.)'
+        description: 'ROM direct download link (.zip, .tgz, etc.)'
         required: true
       ROM_TYPE:
-        description: 'ROM type name (e.g. MIUI, HyperOS, LineageOS)'
+        description: 'ROM name (MIUI, HyperOS, LineageOS, etc.)'
         required: true
-      EXTRACT_PATH:
-        description: 'Folder or file to extract (e.g. vendor/lib/modules, system/app/Settings.apk, etc.)'
-        required: true
-      OUTPUT_ZIP_NAME:
-        description: 'Output zip name (without .zip)'
-        default: 'rom_extract'
+      TARGET_PATH:
+        description: 'Optional folder or file to extract (e.g. vendor/lib/modules)'
+        default: ''
 
 jobs:
   dump:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip zip p7zip-full aria2 lz4 tar python3 python3-pip brotli simg2img mount fuse-overlayfs
-          pip install protobuf bsdiff4
-          echo "✅ Environment ready."
+          sudo apt-get install -y git unzip zip p7zip-full aria2 lz4 brotli python3 python3-pip
+          pip install tqdm rich
+          echo "✅ Basic environment ready."
+
+      - name: Clone DumprX
+        run: |
+          git clone --depth=1 https://github.com/DumprX/DumprX.git dumprx
+          cd dumprx
+          chmod +x setup.sh dumper.sh
+          echo "✅ DumprX cloned."
+
+      - name: Run DumprX setup
+        run: |
+          cd dumprx
+          ./setup.sh || true
+          echo "✅ DumprX setup complete (safe mode)."
 
       - name: Download ROM
         run: |
-          echo "📥 Downloading ROM from ${{ inputs.ROM_URL }}"
           mkdir -p rom
           cd rom
+          echo "📥 Downloading ROM from ${{ inputs.ROM_URL }}"
           aria2c -x16 -s16 -k1M "${{ inputs.ROM_URL }}" -o rom.zip
-          echo "✅ Download complete"
           ls -lh
 
-      - name: Extract ROM archive
+      - name: Extract ROM with DumprX (safe mode)
         run: |
-          cd rom
-          FILE=$(ls)
-          mkdir -p extracted
-          echo "📦 Extracting ROM: $FILE"
+          cd dumprx
+          echo "⚙️ Extracting ROM (rootless safe mode)..."
+          # DumprX expects input file path relative to script
+          sudo -E bash dumper.sh ../rom/rom.zip ../output --no-mount || bash dumper.sh ../rom/rom.zip ../output --no-mount
+          echo "✅ Extraction completed (safe mode)."
+          ls -lh ../output || true
 
-          if [[ "$FILE" == *.zip ]]; then
-            unzip -q "$FILE" -d extracted/
-          elif [[ "$FILE" == *.tgz ]]; then
-            tar -xzf "$FILE" -C extracted/
-          elif [[ "$FILE" == *.tar.gz ]]; then
-            tar -xzf "$FILE" -C extracted/
-          elif [[ "$FILE" == *.7z ]]; then
-            7z x "$FILE" -oextracted/
-          else
-            echo "❌ Unsupported format: $FILE"
-            exit 1
-          fi
-
-          echo "✅ Extraction finished."
-          ls extracted
-
-      - name: Extract payload.bin (if exists)
+      - name: Handle output
         run: |
-          cd rom/extracted
-          if [ -f "payload.bin" ]; then
-            echo "📦 payload.bin detected — extracting partitions..."
-            git clone --depth=1 https://github.com/ssut/payload-dumper-go ../payload-dumper
-            cd ../payload-dumper
-            go build
-            ./payload-dumper-go ../extracted/payload.bin --out ../images
-            cd ..
-            echo "✅ payload.bin extraction complete. Extracted images:"
-            ls images
-          else
-            echo "ℹ️ No payload.bin found, skipping payload extraction."
-          fi
-
-      - name: Extract requested path (auto-detect partition)
-        run: |
-          cd rom
-          TARGET="${{ inputs.EXTRACT_PATH }}"
-          mkdir -p extract_target
-
-          # Automatically detect the partition based on path prefix
-          PART=$(echo "$TARGET" | cut -d'/' -f1)
-          REL_PATH=$(echo "$TARGET" | cut -d'/' -f2-)
-          echo "🔍 Requested extraction: $TARGET"
-          echo "🧩 Base partition: $PART"
-          echo "📁 Relative path: $REL_PATH"
-
-          if [ -f "images/${PART}.img" ]; then
-            echo "🧩 Found ${PART}.img — extracting..."
-            mkdir -p mount_${PART}
-            file images/${PART}.img | grep -q "sparse" && simg2img images/${PART}.img ${PART}_raw.img && mv ${PART}_raw.img images/${PART}.img
-
-            sudo mount -o loop images/${PART}.img mount_${PART} || true
-
-            if [ -d "mount_${PART}/$REL_PATH" ]; then
-              echo "📂 Copying full directory: $REL_PATH"
-              mkdir -p extract_target/$(dirname "$REL_PATH")
-              cp -a "mount_${PART}/$REL_PATH" extract_target/"$REL_PATH"
-            elif [ -f "mount_${PART}/$REL_PATH" ]; then
-              echo "📄 Copying single file: $REL_PATH"
-              mkdir -p extract_target/$(dirname "$REL_PATH")
-              cp -a "mount_${PART}/$REL_PATH" extract_target/"$REL_PATH"
+          cd output || cd rom/output || exit 1
+          if [ -n "${{ inputs.TARGET_PATH }}" ]; then
+            TARGET="${{ inputs.TARGET_PATH }}"
+            echo "🎯 Extracting specific path: $TARGET"
+            if [ -d "$TARGET" ]; then
+              zip -r ../../${{ inputs.ROM_TYPE }}_${TARGET//\//_}.zip "$TARGET"
+            elif [ -f "$TARGET" ]; then
+              zip -r ../../${{ inputs.ROM_TYPE }}_${TARGET//\//_}.zip "$TARGET"
             else
-              echo "❌ Path not found: $REL_PATH"
-              echo "Available top-level directories in ${PART}.img:"
-              ls mount_${PART}
+              echo "❌ Path not found: $TARGET"
               exit 1
             fi
-
-            sudo umount mount_${PART} || true
-            echo "✅ Extraction complete: $TARGET"
           else
-            echo "❌ Partition image not found for ${PART}.img"
-            exit 1
+            echo "📦 Zipping full dump..."
+            zip -r ../../${{ inputs.ROM_TYPE }}_full_dump.zip ./*
           fi
 
-      - name: Compress extracted path
-        run: |
-          cd rom
-          zip -r "../${{ inputs.OUTPUT_ZIP_NAME }}.zip" extract_target/
-          echo "✅ Compressed extracted content: ${{ inputs.OUTPUT_ZIP_NAME }}.zip"
-          ls -lh ../${{ inputs.OUTPUT_ZIP_NAME }}.zip
-
-      - name: Upload extracted path as artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.ROM_TYPE }}-${{ inputs.EXTRACT_PATH }}-extract
-          path: ${{ inputs.OUTPUT_ZIP_NAME }}.zip
+          name: ${{ inputs.ROM_TYPE }}-ROM-Dump
+          path: |
+            *.zip
           retention-days: 7
           
