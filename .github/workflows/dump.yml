@@ -55,17 +55,17 @@ jobs:
         run: |
           cd dumprx
           export TERM=xterm-256color   # Fix for GitHub Actions
-          OUTPUT_PATH="$(pwd)/output"
-          mkdir -p "$OUTPUT_PATH"
 
           echo "⚙️ Extracting ROM (rootless safe mode)..."
-          bash dumper.sh "rom.zip" "$OUTPUT_PATH" --no-mount
+          bash dumper.sh "rom.zip"
           echo "✅ Extraction completed"
-          ls -lh "$OUTPUT_PATH"
+
+          # DumprX default output folder is rom.zip → rom/
+          ls -lh rom
 
       - name: Handle output
         run: |
-          cd dumprx/output || exit 1
+          cd dumprx/rom || exit 1
 
           if [ -n "${{ inputs.TARGET_PATH }}" ]; then
             TARGET="${{ inputs.TARGET_PATH }}"
