@@ -61,7 +61,7 @@ jobs:
 
       - name: Handle output
         run: |
-          # Set DumprX output folder
+          # DumprX default output folder
           OUTPUT=dumprx/out
           cd "$OUTPUT" || exit 1
 
@@ -69,17 +69,15 @@ jobs:
             TARGET="${{ inputs.TARGET_PATH }}"
             echo "🎯 Extracting specific path: $TARGET"
 
-            # Find all matching files/directories recursively
-            FOUND=$(find . -type d -o -type f | grep -E "./$TARGET(/.*)?$")
-
-            if [ -z "$FOUND" ]; then
+            # Check if the folder/file exists
+            if [ -e "$TARGET" ]; then
+              ZIP_NAME="../${{ inputs.ROM_TYPE }}_${TARGET//\//_}.zip"
+              zip -r "$ZIP_NAME" "$TARGET"
+              echo "✅ Zipped specific folder/file: $ZIP_NAME"
+            else
               echo "❌ Path not found: $TARGET"
               exit 1
             fi
-
-            ZIP_NAME="../${{ inputs.ROM_TYPE }}_${TARGET//\//_}.zip"
-            zip -r "$ZIP_NAME" $FOUND
-            echo "✅ Zipped specific folder/file: $ZIP_NAME"
 
           else
             ZIP_NAME="../${{ inputs.ROM_TYPE }}_full_dump.zip"
