@@ -1,4 +1,4 @@
-name: ROM DumperX Extractor (GitHub Safe Mode)
+name: ROM DumperX Extractor
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
         description: 'ROM name (MIUI, HyperOS, LineageOS, etc.)'
         required: true
       TARGET_PATH:
-        description: 'Optional folder or file to extract (e.g., vendor/lib/modules)'
+        description: 'Optional folder or file to extract
         default: ''
 
 jobs:
@@ -60,12 +60,12 @@ jobs:
           bash dumper.sh "rom.zip"
           echo "✅ Extraction completed"
 
-          # DumprX default output folder is rom.zip → rom/
-          ls -lh rom
+          # DumprX default output folder is rom.zip → out/
+          ls -lh out
 
       - name: Handle output
         run: |
-          cd dumprx/rom || exit 1
+          cd dumprx/out || exit 1
 
           if [ -n "${{ inputs.TARGET_PATH }}" ]; then
             TARGET="${{ inputs.TARGET_PATH }}"
