@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       ROM_URL:
-        description: 'ROM direct download link (.zip, .tgz, etc.)'
+        description: 'Direct download link for ROM (.zip, .tgz, etc.) or supported website'
         required: true
       ROM_TYPE:
         description: 'ROM name (MIUI, HyperOS, LineageOS, etc.)'
         required: true
       TARGET_PATH:
-        description: 'Optional folder or file to extract (e.g. vendor/lib/modules)'
+        description: 'Optional folder or file to extract (e.g., vendor/lib/modules)'
         default: ''
 
 jobs:
@@ -44,31 +44,17 @@ jobs:
           ./setup.sh || true
           echo "✅ DumprX setup complete (safe mode)"
 
-      - name: Download ROM
-        run: |
-          mkdir -p rom
-          cd rom
-          echo "📥 Downloading ROM from ${{ inputs.ROM_URL }}"
-          aria2c -x16 -s16 -k1M "${{ inputs.ROM_URL }}" -o rom.zip
-          ls -lh
-          cd ..
-
       - name: Extract ROM with DumprX (safe mode)
         run: |
-          ROM_PATH="$(pwd)/rom/rom.zip"
-          OUTPUT_PATH="$(pwd)/output"
-          mkdir -p "$OUTPUT_PATH"
           cd dumprx
+          export TERM=xterm-256color   # Fix for GitHub Actions
+          OUTPUT_PATH="$(pwd)/../output"
+          mkdir -p "$OUTPUT_PATH"
 
-          if [ -f "$ROM_PATH" ]; then
-            echo "⚙️ Extracting ROM (rootless safe mode)..."
-            bash dumper.sh "$ROM_PATH" "$OUTPUT_PATH" --no-mount
-            echo "✅ Extraction completed"
-            ls -lh "$OUTPUT_PATH"
-          else
-            echo "❌ ROM file not found: $ROM_PATH"
-            exit 1
-          fi
+          echo "⚙️ Extracting ROM from URL (rootless safe mode)..."
+          bash dumper.sh "${{ inputs.ROM_URL }}" "$OUTPUT_PATH" --no-mount
+          echo "✅ Extraction completed"
+          ls -lh "$OUTPUT_PATH"
 
       - name: Handle output
         run: |
@@ -100,3 +86,4 @@ jobs:
           path: |
             *.zip
           retention-days: 7
+          
