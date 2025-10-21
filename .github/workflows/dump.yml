@@ -10,7 +10,7 @@ on:
         description: 'ROM name (MIUI, HyperOS, LineageOS, etc.)'
         required: true
       TARGET_PATH:
-        description: 'Optional folder or file to extract
+        description: 'Optional folder or file to extract'
         default: ''
 
 jobs:
