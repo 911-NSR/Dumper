@@ -1,10 +1,10 @@
-name: ROM DumperX Extractor v2.0.1
+name: ROM DumperX Extractor v2.1
 
 on:
   workflow_dispatch:
     inputs:
       ROM_URL:
-        description: 'Direct download link for ROM (.zip, .tgz, .tar.gz, .7z, etc.) or supported website'
+        description: 'Direct ROM link (.zip, .tgz, .tar.gz, .7z, etc.) or supported site (AFH, SourceForge)'
         required: true
       ROM_TYPE:
         description: 'ROM name (MIUI, HyperOS, LineageOS, etc.)'
@@ -13,11 +13,8 @@ on:
         description: 'Optional: Name of partition directory to extract (directory-only)'
         default: ''
       TARGET_PATH:
-        description: 'Optional: Extract a specific file or folder path inside dumprx/out (ignored if PARTITION_NAME is set)'
+        description: 'Optional: Extract specific file/folder (ignored if PARTITION_NAME is set)'
         default: ''
-      UPLOAD_EXTERNAL:
-        description: 'Optional: upload to external service (true/false) - NOT implemented by default'
-        default: 'false'
 
 jobs:
   dump:
@@ -30,198 +27,149 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup environment (install deps)
+      - name: Setup environment
         run: |
           echo -e "\e[1;34m[SETUP]\e[0m Installing dependencies..."
           sudo apt-get update -y
-          sudo apt-get install -y git unzip zip p7zip-full aria2 lz4 brotli tar file jq p7zip pigz
-          pip3 install --user tqdm rich || true
-          echo -e "\e[1;32m[OK]\e[0m Dependencies installed"
+          sudo apt-get install -y git unzip zip p7zip-full aria2 lz4 brotli tar file jq curl
+          pip3 install tqdm rich >/dev/null 2>&1 || true
+          echo -e "\e[1;32m[OK]\e[0m Dependencies installed ✅"
 
       - name: Clone DumprX
         run: |
           echo -e "\e[1;34m[CLONE]\e[0m Cloning DumprX..."
           rm -rf dumprx || true
           git clone --depth=1 https://github.com/DumprX/DumprX.git dumprx
-          cd dumprx || exit 1
-          chmod +x setup.sh dumper.sh || true
-          echo -e "\e[1;32m[OK]\e[0m DumprX cloned"
+          cd dumprx
+          chmod +x setup.sh dumper.sh
+          echo -e "\e[1;32m[OK]\e[0m DumprX cloned ✅"
 
-      - name: Run DumprX setup (safe)
+      - name: Run DumprX setup
         run: |
           cd dumprx
           ./setup.sh || true
-          echo -e "\e[1;32m[OK]\e[0m DumprX setup finished (safe mode)"
+          echo -e "\e[1;32m[OK]\e[0m DumprX setup done ✅"
 
-      - name: Download ROM with retries (resumable)
+      - name: Smart ROM Download
         run: |
           mkdir -p dumprx/tmp
           cd dumprx/tmp
-          echo -e "\e[1;36m[DOWNLOAD]\e[0m Downloading ROM from: ${{ inputs.ROM_URL }}"
-          ATTEMPTS=0
-          MAX=5
-          while [ $ATTEMPTS -lt $MAX ]; do
-            ((ATTEMPTS++))
-            aria2c -c -x16 -s16 -k1M "${{ inputs.ROM_URL }}" -o rom.download && break
-            echo -e "\e[1;33m[RETRY]\e[0m Attempt $ATTEMPTS failed, retrying in 5s..."
-            sleep 5
-          done
-          if [ ! -f rom.download ]; then
-            echo -e "\e[1;31m[ERROR]\e[0m Download failed after $MAX attempts"
+          echo -e "\e[1;34m[DOWNLOAD]\e[0m Starting download from: \e[1;36m${{ inputs.ROM_URL }}\e[0m"
+
+          # Try aria2 first
+          aria2c -x16 -s16 -k1M -o rom.download "${{ inputs.ROM_URL }}" || true
+
+          # Check if file downloaded properly
+          if [ ! -s rom.download ]; then
+            echo -e "\e[1;33m[WARN]\e[0m aria2c failed, retrying with curl..."
+            curl -L --retry 5 --retry-delay 5 -o rom.download "${{ inputs.ROM_URL }}" || true
+          fi
+
+          # Final check
+          if [ ! -s rom.download ]; then
+            echo -e "\e[1;31m[ERROR]\e[0m Failed to download ROM from provided URL."
             exit 1
           fi
-          # Move to known name and detect type
-          mv -f rom.download rom.bin
-          FILE_TYPE=$(file --brief --mime-type rom.bin || true)
-          echo -e "\e[1;34m[INFO]\e[0m Detected mime-type: $FILE_TYPE"
+
+          # Detect final MIME type
+          FILE_TYPE=$(file --brief --mime-type rom.download)
+          echo -e "\e[1;34m[INFO]\e[0m Detected file type: $FILE_TYPE"
+
           case "$FILE_TYPE" in
             application/x-gzip|application/gzip)
-              mv rom.bin rom.tgz
-              ;;
+              mv rom.download rom.tgz;;
             application/x-tar)
-              mv rom.bin rom.tar
-              ;;
+              mv rom.download rom.tar;;
             application/zip|application/x-zip|application/x-zip-compressed)
-              mv rom.bin rom.zip
-              ;;
+              mv rom.download rom.zip;;
             application/x-7z-compressed)
-              mv rom.bin rom.7z
-              ;;
+              mv rom.download rom.7z;;
             *)
-              # fallback to zip name, dumprx supports zip/tgz usually
-              mv rom.bin rom.zip
-              ;;
+              echo -e "\e[1;33m[WARN]\e[0m Unknown file type, defaulting to rom.zip"
+              mv rom.download rom.zip;;
           esac
+
+          echo -e "\e[1;32m[OK]\e[0m ROM downloaded successfully ✅"
           ls -lh
 
       - name: Extract ROM with DumprX
         id: extract_rom
         run: |
-          set -euo pipefail
           cd dumprx
           export TERM=xterm-256color
-          echo -e "\e[1;34m[EXTRACT]\e[0m Running DumprX dumper..."
-          # try common names (zip/tgz/7z/tar)
+          echo -e "\e[1;34m[EXTRACT]\e[0m Running DumprX extractor..."
+
           if [ -f tmp/rom.zip ]; then
             bash dumper.sh "tmp/rom.zip" || true
+          elif [ -f tmp/rom.tgz ]; then
+            bash dumper.sh "tmp/rom.tgz" || true
+          elif [ -f tmp/rom.7z ]; then
+            bash dumper.sh "tmp/rom.7z" || true
+          elif [ -f tmp/rom.tar ]; then
+            bash dumper.sh "tmp/rom.tar" || true
           fi
-          if [ -d out ]; then
-            echo "success" > ../extract_status.txt
-          else
-            if [ -f tmp/rom.tgz ]; then
-              bash dumper.sh "tmp/rom.tgz" || true
-            fi
-            if [ -d out ]; then
-              echo "success" > ../extract_status.txt
-            else
-              echo "fail" > ../extract_status.txt
-            fi
-          fi
-          echo -e "\e[1;32m[OK]\e[0m DumprX run finished"
 
-      - name: Post-extraction check & cleanup rom archive
-        run: |
-          STATUS=$(cat extract_status.txt || echo "fail")
-          if [ "$STATUS" != "success" ] || [ ! -d "dumprx/out" ]; then
-            echo -e "\e[1;31m[ERROR]\e[0m Extraction failed or dumprx/out missing"
-            # show what we have for debugging
-            echo "dumprx listing:"
-            ls -la dumprx || true
-            echo "dumprx/tmp listing:"
-            ls -la dumprx/tmp || true
+          if [ -d "out" ]; then
+            echo "success" > ../extract_status.txt
+            echo -e "\e[1;32m[OK]\e[0m Extraction succeeded ✅"
+          else
+            echo "fail" > ../extract_status.txt
+            echo -e "\e[1;31m[ERROR]\e[0m Extraction failed ❌"
             exit 1
           fi
-          # Remove original archive files to save space (already inside dumprx/tmp)
-          rm -f dumprx/tmp/rom.zip dumprx/tmp/rom.tgz dumprx/tmp/rom.7z dumprx/tmp/rom.tar || true
-          echo -e "\e[1;32m[OK]\e[0m Post-extract cleanup done"
 
-      - name: Handle output (strict directory-only PARTITION_NAME, targeted path, or full dump)
+      - name: Handle output (partition / target / full)
         run: |
-          set -euo pipefail
           OUTPUT=dumprx/out
           cd "$OUTPUT" || { echo "dumprx/out not found"; exit 1; }
           mkdir -p ../../final_zips
-          # Show available directories for debugging
-          echo -e "\e[1;34m[INFO]\e[0m Available top-level directories (depth 2):"
-          find . -maxdepth 2 -type d -printf "%P\n" | sed '/^$/d' || true
 
-          # PARTITION_NAME (directory-only)
           if [ -n "${{ inputs.PARTITION_NAME }}" ]; then
             PART="${{ inputs.PARTITION_NAME }}"
             echo -e "\e[1;34m[SEARCH]\e[0m Looking for partition directory: $PART"
-            # Strict directory match (case-insensitive)
-            FOUND_PATH=$(find . -type d -iname "$PART" | head -n1 || true)
+            FOUND_PATH=$(find . -type d -iname "$PART" | head -n1)
             if [ -n "$FOUND_PATH" ]; then
-              ZIP_BASE="../../final_zips/${{ inputs.ROM_TYPE }}_${PART}_partition"
-              ZIP_NAME="${ZIP_BASE}.zip"
+              ZIP_NAME="../../final_zips/${{ inputs.ROM_TYPE }}_${PART}_partition.zip"
               echo -e "\e[1;32m[FOUND]\e[0m Found directory: $FOUND_PATH"
-              # Use 7z to split if large; create a zipped archive first
-              echo -e "\e[1;34m[ZIP]\e[0m Creating archive: $ZIP_NAME (may take time)"
-              # Use pigz via tar for faster compression into a single .tar.gz (then convert to zip if required)
-              # Simpler: use 7z for solid compression and splitting
-              7z a -tzip -mx=9 -mmt=on "$ZIP_NAME" "$FOUND_PATH" >/dev/null
-              # If zip exceeds 1900mb, split into 1900m volumes (7z supports -v)
-              SIZE_BYTES=$(stat -c%s "$ZIP_NAME" || echo 0)
-              if [ "$SIZE_BYTES" -gt $((1900 * 1024 * 1024)) ]; then
-                echo -e "\e[1;33m[SPLIT]\e[0m Archive is large, creating split volumes (~1900M)..."
-                7z a -tzip -mx=9 -v1900m "${ZIP_BASE}.zip" "$FOUND_PATH"
-                # remove the single big file if volumes created (7z names volumes like .z01 etc)
-                rm -f "$ZIP_NAME" || true
-              fi
-              echo -e "\e[1;32m[DONE]\e[0m Partition archive(s) created in ../../final_zips/"
+              zip -r -9 "$ZIP_NAME" "$FOUND_PATH"
+              echo -e "\e[1;32m[OK]\e[0m Zipped partition: $ZIP_NAME ✅"
             else
-              echo -e "\e[1;31m[ERROR]\e[0m Partition directory not found: $PART"
-              echo "Available directories (depth ≤3):"
+              echo -e "\e[1;31m[ERROR]\e[0m No partition directory named $PART found."
               find . -maxdepth 3 -type d
               exit 1
             fi
 
           elif [ -n "${{ inputs.TARGET_PATH }}" ]; then
             TARGET="${{ inputs.TARGET_PATH }}"
-            echo -e "\e[1;34m[TARGET]\e[0m Extracting path: $TARGET"
+            echo -e "\e[1;34m[TARGET]\e[0m Extracting: $TARGET"
             if [ -e "$TARGET" ]; then
               SAFE_NAME="${TARGET//\//_}"
               ZIP_NAME="../../final_zips/${{ inputs.ROM_TYPE }}_${SAFE_NAME}.zip"
-              7z a -tzip -mx=9 -mmt=on "$ZIP_NAME" "$TARGET" >/dev/null
-              echo -e "\e[1;32m[DONE]\e[0m Target zipped: $ZIP_NAME"
+              zip -r -9 "$ZIP_NAME" "$TARGET"
+              echo -e "\e[1;32m[OK]\e[0m Zipped: $ZIP_NAME ✅"
             else
-              echo -e "\e[1;31m[ERROR]\e[0m Target path not found: $TARGET"
+              echo -e "\e[1;31m[ERROR]\e[0m Path not found: $TARGET"
               exit 1
             fi
 
           else
-            echo -e "\e[1;34m[ZIP]\e[0m Creating full dump zip..."
-            ZIP_BASE="../../final_zips/${{ inputs.ROM_TYPE }}_full_dump"
-            7z a -tzip -mx=9 -mmt=on "${ZIP_BASE}.zip" ./* >/dev/null || true
-            # if too large, split
-            if [ -f "${ZIP_BASE}.zip" ]; then
-              SIZE_BYTES=$(stat -c%s "${ZIP_BASE}.zip" || echo 0)
-              if [ "$SIZE_BYTES" -gt $((1900 * 1024 * 1024)) ]; then
-                echo -e "\e[1;33m[SPLIT]\e[0m Full dump is large, creating split volumes (~1900M)..."
-                7z a -tzip -mx=9 -v1900m "${ZIP_BASE}.zip" ./*
-                rm -f "${ZIP_BASE}.zip" || true
-              fi
-            fi
-            echo -e "\e[1;32m[DONE]\e[0m Full dump saved in ../../final_zips/"
+            ZIP_NAME="../../final_zips/${{ inputs.ROM_TYPE }}_full_dump.zip"
+            echo -e "\e[1;34m[ZIP]\e[0m Creating full ROM dump..."
+            zip -r -9 "$ZIP_NAME" ./*
+            echo -e "\e[1;32m[OK]\e[0m Full ROM dump ready: $ZIP_NAME ✅"
           fi
 
-      - name: Upload artifact(s)
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.ROM_TYPE }}-ROM-Dump
-          path: final_zips/**
+          path: final_zips/*.zip
           retention-days: 7
 
       - name: Cleanup workspace
         if: always()
         run: |
-          echo -e "\e[1;34m[CLEANUP]\e[0m Removing temporary files..."
-          rm -rf dumprx/tmp dumprx/out dumprx/base || true
-          echo -e "\e[1;32m[OK]\e[0m Cleanup complete"
-
-      - name: Summary
-        if: success()
-        run: |
-          echo -e "\e[1;32m[SUMMARY]\e[0m ROM DumperX v2.0.1 completed successfully."
-          echo -e "\e[1;34m[INFO]\e[0m Artifacts (final_zips/) uploaded as action artifact."
+          echo -e "\e[1;34m[CLEANUP]\e[0m Cleaning temporary files..."
+          rm -rf dumprx/tmp dumprx/rom* dumprx/out extract_status.txt || true
+          echo -e "\e[1;32m[OK]\e[0m Cleanup complete ✅"
           
