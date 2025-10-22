@@ -41,7 +41,7 @@ jobs:
           chmod +x setup.sh dumper.sh
           echo "✅ DumprX cloned"
 
-      - name: Run DumprX setup (safe mode)
+      - name: Run DumprX setup
         run: |
           cd dumprx
           ./setup.sh || true
