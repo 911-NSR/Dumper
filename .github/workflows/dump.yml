@@ -10,7 +10,10 @@ on:
         description: 'ROM name (MIUI, HyperOS, LineageOS, etc.)'
         required: true
       TARGET_PATH:
-        description: 'Optional folder or file to extract inside the ROM output'
+        description: 'Optional folder or file to extract inside the ROM output (ignored if PARTITION_NAME is set)'
+        default: ''
+      PARTITION_NAME:
+        description: 'Optional specific partition to extract (system, vendor, boot, etc.)'
         default: ''
 
 jobs:
@@ -52,36 +55,63 @@ jobs:
           ls -lh rom.zip
 
       - name: Extract ROM with DumprX
+        id: extract_rom
         run: |
           cd dumprx
           export TERM=xterm-256color
           echo "⚙️ Extracting ROM (rootless safe mode)..."
-          bash dumper.sh "rom.zip"
-          echo "✅ Extraction completed"
+          bash dumper.sh "rom.zip" && echo "success" > ../extract_status.txt || echo "fail" > ../extract_status.txt
+          echo "✅ Extraction process finished"
+
+      - name: Post-extraction logic
+        run: |
+          STATUS=$(cat extract_status.txt || echo "fail")
+          if [ "$STATUS" = "success" ] && [ -d "dumprx/out" ]; then
+            echo "✅ Dump succeeded. Cleaning up rom.zip..."
+            rm -f dumprx/rom.zip || true
+          else
+            echo "❌ Extraction failed or output not found. Keeping rom.zip for debugging."
+            exit 1
+          fi
 
       - name: Handle output
         run: |
-          # DumprX default output folder
           OUTPUT=dumprx/out
           cd "$OUTPUT" || exit 1
 
-          if [ -n "${{ inputs.TARGET_PATH }}" ]; then
+          mkdir -p ../../final_zips
+
+          # Priority: PARTITION_NAME > TARGET_PATH > full dump
+          if [ -n "${{ inputs.PARTITION_NAME }}" ]; then
+            PART="${{ inputs.PARTITION_NAME }}"
+            echo "🧩 Extracting specific partition: $PART"
+
+            FOUND=$(find . -type f -iname "${PART}.*" | head -n1)
+            if [ -n "$FOUND" ]; then
+              ZIP_NAME="../../final_zips/${{ inputs.ROM_TYPE }}_${PART}_partition.zip"
+              zip -r -9 "$ZIP_NAME" "$FOUND"
+              echo "✅ Zipped partition: $ZIP_NAME"
+            else
+              echo "❌ Partition not found: $PART"
+              exit 1
+            fi
+
+          elif [ -n "${{ inputs.TARGET_PATH }}" ]; then
             TARGET="${{ inputs.TARGET_PATH }}"
             echo "🎯 Extracting specific path: $TARGET"
 
-            # Check if the folder/file exists
             if [ -e "$TARGET" ]; then
-              ZIP_NAME="../${{ inputs.ROM_TYPE }}_${TARGET//\//_}.zip"
-              zip -r "$ZIP_NAME" "$TARGET"
-              echo "✅ Zipped specific folder/file: $ZIP_NAME"
+              ZIP_NAME="../../final_zips/${{ inputs.ROM_TYPE }}_${TARGET//\//_}.zip"
+              zip -r -9 "$ZIP_NAME" "$TARGET"
+              echo "✅ Zipped folder/file: $ZIP_NAME"
             else
               echo "❌ Path not found: $TARGET"
               exit 1
             fi
 
           else
-            ZIP_NAME="../${{ inputs.ROM_TYPE }}_full_dump.zip"
-            zip -r "$ZIP_NAME" ./*
+            ZIP_NAME="../../final_zips/${{ inputs.ROM_TYPE }}_full_dump.zip"
+            zip -r -9 "$ZIP_NAME" ./*
             echo "✅ Zipped full ROM dump: $ZIP_NAME"
           fi
 
@@ -89,7 +119,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.ROM_TYPE }}-ROM-Dump
-          path: |
-            dumprx/*.zip
+          path: final_zips/*.zip
           retention-days: 7
           
