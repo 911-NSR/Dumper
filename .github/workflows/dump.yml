@@ -13,7 +13,7 @@ on:
         description: 'Optional folder or file to extract inside the ROM output (ignored if PARTITION_NAME is set)'
         default: ''
       PARTITION_NAME:
-        description: 'Optional specific partition to extract (system, vendor, boot, etc.)'
+        description: 'Optional specific partition directory to extract (system, vendor, product, etc.)'
         default: ''
 
 jobs:
@@ -97,17 +97,18 @@ jobs:
           # Priority: PARTITION_NAME > TARGET_PATH > full dump
           if [ -n "${{ inputs.PARTITION_NAME }}" ]; then
             PART="${{ inputs.PARTITION_NAME }}"
-            echo -e "\e[1;34m[SEARCH]\e[0m Looking for partition path: \e[1;36m$PART\e[0m"
+            echo -e "\e[1;34m[SEARCH]\e[0m Looking for partition directory: \e[1;36m$PART\e[0m"
 
-            FOUND_PATH=$(find . -type d -iname "$PART" -o -type f -iname "$PART.*" | head -n1)
+            # Search only for directories
+            FOUND_PATH=$(find . -type d -iname "$PART" | head -n1)
 
             if [ -n "$FOUND_PATH" ]; then
               ZIP_NAME="../../final_zips/${{ inputs.ROM_TYPE }}_${PART}_partition.zip"
-              echo -e "\e[1;32m[FOUND]\e[0m Partition path: $FOUND_PATH"
+              echo -e "\e[1;32m[FOUND]\e[0m Found directory: $FOUND_PATH"
               zip -r -9 "$ZIP_NAME" "$FOUND_PATH"
-              echo -e "\e[1;32m[OK]\e[0m Zipped partition: $ZIP_NAME ✅"
+              echo -e "\e[1;32m[OK]\e[0m Zipped partition directory: $ZIP_NAME ✅"
             else
-              echo -e "\e[1;31m[ERROR]\e[0m Partition path not found: $PART"
+              echo -e "\e[1;31m[ERROR]\e[0m Partition directory not found: $PART"
               echo "📁 Available directories:"
               find . -maxdepth 3 -type d
               exit 1
